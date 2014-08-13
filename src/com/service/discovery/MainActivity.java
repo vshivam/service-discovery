@@ -1,6 +1,15 @@
 package com.service.discovery;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
 import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 
 import android.app.Activity;
@@ -30,12 +39,12 @@ public class MainActivity extends Activity {
 	PlaceholderFragment placeholderFragment;
 	Button server;
 	Button client;
+	ServerSocket mServerSocket;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_main);
-
 		client = (Button) findViewById(R.id.client);
 		server = (Button) findViewById(R.id.server);
 
@@ -52,15 +61,67 @@ public class MainActivity extends Activity {
 
 			@Override
 			public void onClick(View v) {
-				registerService(9050);
+				new Runnable() {
+
+					@Override
+					public void run() {
+
+						try {
+							mServerSocket = new ServerSocket(0);
+							registerService(mServerSocket.getLocalPort());
+							while (!Thread.currentThread().isInterrupted()) {
+								Socket clientSocket = mServerSocket.accept();
+
+								CommunicationThread mCommunicationThread = new CommunicationThread(
+										clientSocket);
+								new Thread(mCommunicationThread).start();
+							}
+						} catch (IOException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						}
+					}
+				};
 			}
 		});
+
 		mNsdManager = (NsdManager) getSystemService(Context.NSD_SERVICE);
 		placeholderFragment = new PlaceholderFragment();
 		if (savedInstanceState == null) {
 			getFragmentManager().beginTransaction()
 					.add(R.id.container, placeholderFragment).commit();
 		}
+	}
+
+	class CommunicationThread implements Runnable {
+
+		private Socket clientSocket;
+
+		private BufferedReader input;
+
+		public CommunicationThread(Socket clientSocket) {
+
+			this.clientSocket = clientSocket;
+
+			try {
+				this.input = new BufferedReader(new InputStreamReader(
+						this.clientSocket.getInputStream()));
+
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+
+		public void run() {
+			while (!Thread.currentThread().isInterrupted()) {
+				try {
+					String read = input.readLine();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+		}
+
 	}
 
 	@Override
@@ -89,15 +150,16 @@ public class MainActivity extends Activity {
 	RegistrationListener mRegistrationListener = new NsdManager.RegistrationListener() {
 
 		@Override
-		public void onServiceRegistered(NsdServiceInfo NsdServiceInfo) {
+		public void onServiceRegistered(NsdServiceInfo nsdServiceInfo) {
 			// Save the service name. Android may have changed it in order
 			// to
 			// resolve a conflict, so update the name you initially
 			// requested
 			// with the name Android actually used.
-			String mServiceName = NsdServiceInfo.getServiceName();
+			String mServiceName = nsdServiceInfo.getServiceName();
 			SERVICE_NAME = mServiceName;
-			Log.d(LOGTAG, "Registered name : " + mServiceName);
+			Log.d(LOGTAG, "Registered name : " + mServiceName + " on "
+					+ nsdServiceInfo.getHost() + ":" + nsdServiceInfo.getPort());
 		}
 
 		@Override
@@ -145,6 +207,7 @@ public class MainActivity extends Activity {
 			} else if (service.getServiceName().equals(SERVICE_NAME)) {
 				// The name of the service tells the user what they'd be
 				// connecting to. It could be "Bob's Chat App".
+				mNsdManager.resolveService(service, mResolveListener);
 				placeholderFragment.refreshList("Self : "
 						+ service.getServiceName());
 				Log.d(TAG, "Same machine: " + SERVICE_NAME);
@@ -192,15 +255,48 @@ public class MainActivity extends Activity {
 		@Override
 		public void onServiceResolved(NsdServiceInfo serviceInfo) {
 			Log.e(TAG, "Resolve Succeeded. " + serviceInfo);
-
-			if (serviceInfo.getServiceName().equals(SERVICE_NAME)) {
-				Log.d(TAG, "Same IP.");
-				return;
-			}
 			int port = serviceInfo.getPort();
 			InetAddress host = serviceInfo.getHost();
+			new Thread(new ClientThread(host, port)).start();
+
+			PrintWriter out;
+			try {
+				out = new PrintWriter(new BufferedWriter(
+						new OutputStreamWriter(socket.getOutputStream())), true);
+				out.println("Hi! Server");
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
 		}
 	};
+
+	Socket socket;
+
+	class ClientThread implements Runnable {
+
+		InetAddress inetAddress;
+		int port;
+
+		public ClientThread(final InetAddress inetAddress, int port) {
+			this.inetAddress = inetAddress;
+			this.port = port;
+		}
+
+		@Override
+		public void run() {
+
+			try {
+				socket = new Socket(inetAddress, port);
+			} catch (UnknownHostException e1) {
+				e1.printStackTrace();
+			} catch (IOException e1) {
+				e1.printStackTrace();
+			}
+
+		}
+
+	}
 
 	@Override
 	public boolean onCreateOptionsMenu(Menu menu) {
