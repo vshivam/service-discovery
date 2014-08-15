@@ -1,33 +1,36 @@
 package com.service.discovery;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
-import java.net.Socket;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 
 import android.app.Activity;
 import android.app.Fragment;
 import android.content.Context;
+import android.media.AudioManager;
+import android.media.MediaPlayer;
+import android.media.MediaPlayer.OnPreparedListener;
 import android.net.nsd.NsdManager;
 import android.net.nsd.NsdManager.RegistrationListener;
 import android.net.nsd.NsdServiceInfo;
 import android.os.Bundle;
+import android.os.Handler;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.View.OnClickListener;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.ListView;
+import android.widget.TextView;
+import android.widget.Toast;
 
 public class MainActivity extends Activity {
 
@@ -39,7 +42,11 @@ public class MainActivity extends Activity {
 	PlaceholderFragment placeholderFragment;
 	Button server;
 	Button client;
-	ServerSocket mServerSocket;
+	Button play;
+	Handler handler;
+	Activity activity;
+	String clientIp;
+	int clientPort;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -47,11 +54,14 @@ public class MainActivity extends Activity {
 		setContentView(R.layout.activity_main);
 		client = (Button) findViewById(R.id.client);
 		server = (Button) findViewById(R.id.server);
-
+		play = (Button) findViewById(R.id.play);
+		handler = new Handler();
+		activity = this;
 		client.setOnClickListener(new View.OnClickListener() {
 
 			@Override
 			public void onClick(View v) {
+				placeholderFragment.clearList();
 				mNsdManager.discoverServices(SERVICE_TYPE,
 						NsdManager.PROTOCOL_DNS_SD, mDiscoveryListener);
 			}
@@ -61,27 +71,41 @@ public class MainActivity extends Activity {
 
 			@Override
 			public void onClick(View v) {
-				new Runnable() {
+				try {
+					bindServer(findFreePort());
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+		});
 
-					@Override
-					public void run() {
+		play.setOnClickListener(new OnClickListener() {
 
-						try {
-							mServerSocket = new ServerSocket(0);
-							registerService(mServerSocket.getLocalPort());
-							while (!Thread.currentThread().isInterrupted()) {
-								Socket clientSocket = mServerSocket.accept();
+			@Override
+			public void onClick(View v) {
+				final MediaPlayer mediaPlayer = new MediaPlayer();
+				mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
+				try {
+					mediaPlayer.setDataSource("http://" + clientIp + ":"
+							+ (clientPort + 1));
+					Log.d("Client Ip", "http://" + clientIp + ":"
+							+ (clientPort + 1));
+					mediaPlayer.prepare(); // might take long! (for buffering,
+											// etc)
+					mediaPlayer.setOnPreparedListener(new OnPreparedListener() {
 
-								CommunicationThread mCommunicationThread = new CommunicationThread(
-										clientSocket);
-								new Thread(mCommunicationThread).start();
-							}
-						} catch (IOException e) {
-							// TODO Auto-generated catch block
-							e.printStackTrace();
+						@Override
+						public void onPrepared(MediaPlayer mp) {
+							mediaPlayer.start();
+
 						}
-					}
-				};
+					});
+				} catch (IllegalArgumentException | SecurityException
+						| IllegalStateException | IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+
 			}
 		});
 
@@ -93,33 +117,27 @@ public class MainActivity extends Activity {
 		}
 	}
 
-	class CommunicationThread implements Runnable {
+	public int findFreePort() throws IOException {
+		ServerSocket server = new ServerSocket(0);
+		int port = server.getLocalPort();
+		server.close();
+		Log.d(LOGTAG, "Free Port : " + port);
+		placeholderFragment.refreshPort(port);
+		return port;
+	}
 
-		private Socket clientSocket;
-
-		private BufferedReader input;
-
-		public CommunicationThread(Socket clientSocket) {
-
-			this.clientSocket = clientSocket;
-
-			try {
-				this.input = new BufferedReader(new InputStreamReader(
-						this.clientSocket.getInputStream()));
-
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
-		}
-
-		public void run() {
-			while (!Thread.currentThread().isInterrupted()) {
-				try {
-					String read = input.readLine();
-				} catch (IOException e) {
-					e.printStackTrace();
-				}
-			}
+	private void bindServer(int port) {
+		GrillboxSocketServer grillboxServer;
+		try {
+			grillboxServer = new GrillboxSocketServer(port, handler, activity);
+			grillboxServer.start();
+			Toast.makeText(activity,
+					"Starting on Port" + grillboxServer.getPort(),
+					Toast.LENGTH_SHORT).show();
+			registerService(port);
+		} catch (UnknownHostException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
 		}
 
 	}
@@ -127,8 +145,8 @@ public class MainActivity extends Activity {
 	@Override
 	protected void onPause() {
 		super.onPause();
-		mNsdManager.unregisterService(mRegistrationListener);
-		mNsdManager.stopServiceDiscovery(mDiscoveryListener);
+//		mNsdManager.unregisterService(mRegistrationListener);
+//		mNsdManager.stopServiceDiscovery(mDiscoveryListener);
 	}
 
 	@Override
@@ -139,10 +157,11 @@ public class MainActivity extends Activity {
 
 	public void registerService(int port) {
 		NsdServiceInfo serviceInfo = new NsdServiceInfo();
+		serviceInfo.setPort(port);
 		serviceInfo.setServiceName(SERVICE_NAME);
 		serviceInfo.setServiceType(SERVICE_TYPE);
-		serviceInfo.setPort(port);
 
+		Log.d(LOGTAG, "Registering Service on port  " + port);
 		mNsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD,
 				mRegistrationListener);
 	}
@@ -167,6 +186,7 @@ public class MainActivity extends Activity {
 				int errorCode) {
 			// Registration failed! Put debugging code here to determine
 			// why.
+			Log.d(LOGTAG, "Registration Failed");
 		}
 
 		@Override
@@ -244,6 +264,7 @@ public class MainActivity extends Activity {
 		}
 	};
 
+	GrillboxSocketClient grillboxClient;
 	NsdManager.ResolveListener mResolveListener = new NsdManager.ResolveListener() {
 
 		@Override
@@ -257,46 +278,28 @@ public class MainActivity extends Activity {
 			Log.e(TAG, "Resolve Succeeded. " + serviceInfo);
 			int port = serviceInfo.getPort();
 			InetAddress host = serviceInfo.getHost();
-			new Thread(new ClientThread(host, port)).start();
-
-			PrintWriter out;
+			Log.d(LOGTAG, "Host : " + host + "port : " + port);
+			clientIp = host.getHostAddress();
+			clientPort = serviceInfo.getPort();
+			String uriString = "ws:/" + host + ":" + port;
+			Toast.makeText(activity, uriString, Toast.LENGTH_SHORT).show();
 			try {
-				out = new PrintWriter(new BufferedWriter(
-						new OutputStreamWriter(socket.getOutputStream())), true);
-				out.println("Hi! Server");
+				grillboxClient = new GrillboxSocketClient(new URI(uriString),
+						handler, activity);
+				grillboxClient.connect();
+
+				MusicServer musicServer = new MusicServer(
+						serviceInfo.getPort() + 1);
+				musicServer.start();
+			} catch (URISyntaxException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
 			} catch (IOException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 		}
 	};
-
-	Socket socket;
-
-	class ClientThread implements Runnable {
-
-		InetAddress inetAddress;
-		int port;
-
-		public ClientThread(final InetAddress inetAddress, int port) {
-			this.inetAddress = inetAddress;
-			this.port = port;
-		}
-
-		@Override
-		public void run() {
-
-			try {
-				socket = new Socket(inetAddress, port);
-			} catch (UnknownHostException e1) {
-				e1.printStackTrace();
-			} catch (IOException e1) {
-				e1.printStackTrace();
-			}
-
-		}
-
-	}
 
 	@Override
 	public boolean onCreateOptionsMenu(Menu menu) {
@@ -326,8 +329,13 @@ public class MainActivity extends Activity {
 		ListView servicesListView;
 		ArrayList<String> servicesList;
 		ArrayAdapter<String> adapter;
+		TextView serverPort;
 
 		public PlaceholderFragment() {
+		}
+
+		public void refreshPort(int port) {
+			serverPort.setText(port + "");
 		}
 
 		@Override
@@ -335,6 +343,7 @@ public class MainActivity extends Activity {
 				Bundle savedInstanceState) {
 			View rootView = inflater.inflate(R.layout.fragment_main, container,
 					false);
+			serverPort = (TextView) rootView.findViewById(R.id.hello_world);
 			servicesList = new ArrayList<String>();
 			servicesListView = (ListView) rootView
 					.findViewById(R.id.servicesList);
@@ -350,6 +359,18 @@ public class MainActivity extends Activity {
 				@Override
 				public void run() {
 					servicesList.add(serviceName);
+					adapter.notifyDataSetChanged();
+				}
+			});
+
+		}
+
+		public void clearList() {
+			getActivity().runOnUiThread(new Runnable() {
+
+				@Override
+				public void run() {
+					servicesList.clear();
 					adapter.notifyDataSetChanged();
 				}
 			});
