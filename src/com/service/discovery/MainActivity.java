@@ -57,6 +57,15 @@ public class MainActivity extends Activity {
 		play = (Button) findViewById(R.id.play);
 		handler = new Handler();
 		activity = this;
+		MusicServer.getListOfMusicFiles(this);
+
+		try {
+			MusicServer musicServer = new MusicServer(8090);
+			musicServer.start();
+		} catch (IOException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
 		client.setOnClickListener(new View.OnClickListener() {
 
 			@Override
@@ -100,8 +109,16 @@ public class MainActivity extends Activity {
 
 						}
 					});
-				} catch (IllegalArgumentException | SecurityException
-						| IllegalStateException | IOException e) {
+				} catch (IllegalArgumentException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				} catch (SecurityException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				} catch (IllegalStateException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				} catch (IOException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
 				}
@@ -145,8 +162,8 @@ public class MainActivity extends Activity {
 	@Override
 	protected void onPause() {
 		super.onPause();
-//		mNsdManager.unregisterService(mRegistrationListener);
-//		mNsdManager.stopServiceDiscovery(mDiscoveryListener);
+		// mNsdManager.unregisterService(mRegistrationListener);
+		// mNsdManager.stopServiceDiscovery(mDiscoveryListener);
 	}
 
 	@Override
@@ -288,13 +305,7 @@ public class MainActivity extends Activity {
 						handler, activity);
 				grillboxClient.connect();
 
-				MusicServer musicServer = new MusicServer(
-						serviceInfo.getPort() + 1);
-				musicServer.start();
 			} catch (URISyntaxException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (IOException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
